@@ -8,8 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start:server": "node server/proxy.js",
-    "start": "npm run dev"
+    "start:server": "node server/index.js",
+    "start": "npm run start:server"
   },
   "dependencies": {
     "cors": "^2.8.5",
