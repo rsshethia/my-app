@@ -196,7 +196,7 @@ function App() {
         <div>
           <p className="eyebrow">V/Line live operations</p>
           <h1>Vehicle positions</h1>
-          <p className="subtitle">A live view of every vehicle position returned by the feed.</p>
+          <p className="subtitle">Where is my train dude? A live view of every vehicle position returned by the feed.</p>
         </div>
         {!loading && !error && <div className="feed-stat"><strong>{points.length}</strong><span>vehicles plotted</span></div>}
       </header>
