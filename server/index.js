@@ -16,12 +16,22 @@ const db = getPool()
 if (db) {
   try {
     await initDb(db)
-    console.log('[db] positions table ready')
+    const host = db.options?.host ?? 'pool (connection string)'
+    console.log(`[db] positions table ready (host: ${host})`)
   } catch (err) {
-    console.error('[db] init failed:', err.message)
+    console.error('[db] init failed:', describeDbError(err))
   }
 } else {
   console.warn('[db] DATABASE_URL not set — history endpoints disabled, /api/live still works if VLINE_KEY is set')
+}
+
+// Translate low-level pg errors into actionable messages (no secrets).
+function describeDbError(err) {
+  const msg = err?.message ?? String(err)
+  if (/ENOTFOUND/i.test(msg)) {
+    return `${msg} — check PGHOST/DATABASE_URL for stray quotes or spaces; it must be a bare hostname`
+  }
+  return msg
 }
 
 if (db && apiKey) {

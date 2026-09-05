@@ -4,9 +4,18 @@ const { Pool } = pg
 
 let pool = null
 
+// Render/dotenv values sometimes arrive with surrounding quotes or whitespace
+// (e.g. PGHOST='ep-....neon.tech'), which makes DNS fail with
+// "getaddrinfo ENOTFOUND 'host'". Strip those before connecting.
+function clean(value, fallback = undefined) {
+  if (value === undefined || value === null) return fallback
+  const s = String(value).trim().replace(/^['"]+|['"]+$/g, '').trim()
+  return s === '' ? fallback : s
+}
+
 export function getPool() {
   if (pool) return pool
-  const connectionString = process.env.DATABASE_URL
+  const connectionString = clean(process.env.DATABASE_URL)
   if (connectionString) {
     pool = new Pool({
       connectionString,
@@ -14,14 +23,14 @@ export function getPool() {
       max: 5,
       idleTimeoutMillis: 30000,
     })
-  } else if (process.env.PGHOST && process.env.PGUSER) {
+  } else if (clean(process.env.PGHOST) && clean(process.env.PGUSER)) {
     // Fallback for split PG* vars (Neon "parameters" style .env).
     pool = new Pool({
-      host: process.env.PGHOST,
-      port: Number(process.env.PGPORT) || 5432,
-      database: process.env.PGDATABASE || 'neondb',
-      user: process.env.PGUSER,
-      password: process.env.PGPASSWORD,
+      host: clean(process.env.PGHOST),
+      port: Number(clean(process.env.PGPORT, '5432')) || 5432,
+      database: clean(process.env.PGDATABASE, 'neondb'),
+      user: clean(process.env.PGUSER),
+      password: clean(process.env.PGPASSWORD),
       ssl: { rejectUnauthorized: false },
       max: 5,
       idleTimeoutMillis: 30000,
