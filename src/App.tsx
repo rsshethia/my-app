@@ -8,8 +8,51 @@ type VehiclePoint = {
   id: string
   latitude: number
   longitude: number
-  bearing?: number
+  bearing: number
+  hasBearing: boolean
+  compass: string
+  line: string
+  routeId: string
+  tripId: string
+  vehicleLabel: string
+  timestampSec: number | null
+  speedKmh: number | null
   values: Record<string, string>
+}
+
+const COMPASS_8 = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+
+// GTFS-RT bearing: degrees clockwise from North (0=N, 90=E, 180=S, 270=W).
+function toCompass(bearing: number) {
+  if (!Number.isFinite(bearing)) return '-'
+  const normalized = ((bearing % 360) + 360) % 360
+  return COMPASS_8[Math.round(normalized / 45) % 8]
+}
+
+// Route IDs look like "aus:vic:vic-01-GEL:" — the line code is the last
+// dash-segment ("GEL"). Falls back to the raw ID or "Unknown".
+function extractLineCode(routeId: string) {
+  if (!routeId || routeId === '-') return 'Unknown'
+  const colonPart = routeId.split(':').filter(Boolean).pop() ?? routeId
+  const dashPart = colonPart.split('-').filter(Boolean).pop() ?? colonPart
+  const code = dashPart.trim().toUpperCase()
+  return code || 'Unknown'
+}
+
+function formatAge(ageSec: number | null) {
+  if (ageSec === null || !Number.isFinite(ageSec) || ageSec < 0) return 'unknown age'
+  if (ageSec < 60) return `${Math.floor(ageSec)}s ago`
+  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m ago`
+  return `${Math.floor(ageSec / 3600)}h ago`
+}
+
+// Fresh <90s, ageing <5m, stale beyond that. Feed has no speed/status
+// fields today, so staleness is the main reliability signal.
+function freshness(ageSec: number | null) {
+  if (ageSec === null) return 'unknown'
+  if (ageSec < 90) return 'live'
+  if (ageSec < 300) return 'ageing'
+  return 'stale'
 }
 
 // Flatten nested GTFS entities into table-friendly paths such as
@@ -45,8 +88,8 @@ function escapeHtml(value: string) {
 }
 
 // The feed contains many entity types, so only entities with valid coordinates
-// become map rows. The flattened values remain attached for the full data table
-// and marker popup rather than discarding fields during normalization.
+// become map rows. Derived fields (line, compass, age) are prepended to the
+// flattened values so the table, popup and filters share one source of truth.
 function extractVehiclePoints(data: VehiclePositionFeed): VehiclePoint[] {
   const feed = data && typeof data === 'object' && !Array.isArray(data)
     ? data as Record<string, unknown>
@@ -64,19 +107,50 @@ function extractVehiclePoints(data: VehiclePositionFeed): VehiclePoint[] {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return []
 
     const id = values.id && values.id !== '-' ? values.id : `vehicle-${index + 1}`
-    const bearingValue = Number(values['vehicle.position.bearing'])
+    const rawBearing = Number(values['vehicle.position.bearing'])
+    const hasBearing = Number.isFinite(rawBearing)
+    const bearing = hasBearing ? (((rawBearing % 360) + 360) % 360) : 0
+    const routeId = values['vehicle.trip.routeId'] ?? '-'
+    const line = extractLineCode(routeId)
+    const tripId = values['vehicle.trip.tripId'] ?? '-'
+    const vehicleLabel = values['vehicle.vehicle.id'] && values['vehicle.vehicle.id'] !== '-'
+      ? values['vehicle.vehicle.id']
+      : id
+    const rawTimestamp = Number(values['vehicle.timestamp'])
+    const timestampSec = Number.isFinite(rawTimestamp) && rawTimestamp > 0 ? Math.floor(rawTimestamp) : null
+    // Not present in the current V/Line feed, but handled for when it is.
+    // GTFS-RT speed is metres/sec.
+    const rawSpeed = Number(values['vehicle.position.speed'])
+    const speedKmh = Number.isFinite(rawSpeed) ? Math.round(rawSpeed * 3.6) : null
+
+    const derived: Record<string, string> = {
+      line,
+      vehicle: vehicleLabel,
+      'heading.deg': hasBearing ? `${Math.round(bearing)}°` : '-',
+      'heading.compass': hasBearing ? toCompass(bearing) : '-',
+      'position.speedKmh': speedKmh !== null ? String(speedKmh) : '-',
+    }
+    const merged = { ...derived, ...values }
 
     return [{
       id,
       latitude,
       longitude,
-      bearing: Number.isFinite(bearingValue) ? bearingValue : undefined,
-      values,
+      bearing,
+      hasBearing,
+      compass: hasBearing ? toCompass(bearing) : '-',
+      line,
+      routeId,
+      tripId,
+      vehicleLabel,
+      timestampSec,
+      speedKmh,
+      values: merged,
     }]
   })
 }
 
-function VehicleMap({ points }: { points: VehiclePoint[] }) {
+function VehicleMap({ points, nowMs }: { points: VehiclePoint[]; nowMs: number }) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<Map | null>(null)
   const [mapReady, setMapReady] = useState(false)
@@ -89,6 +163,9 @@ function VehicleMap({ points }: { points: VehiclePoint[] }) {
     if (!mapContainer.current || !token || map.current) return
 
     setMapError(null)
+    const handleError = (event: { error?: { message?: string } }) => {
+      if (event.error?.message) setMapError('Mapbox could not load the map style. Check that VITE_MAPBOX_TOKEN is valid.')
+    }
     map.current = new Map({
       accessToken: token,
       container: mapContainer.current,
@@ -100,12 +177,11 @@ function VehicleMap({ points }: { points: VehiclePoint[] }) {
     // Markers are added only after the style has loaded; before that point the
     // map can exist while its basemap is still unavailable.
     map.current.once('load', () => setMapReady(true))
-    map.current.on('error', (event) => {
-      if (event.error?.message) setMapError('Mapbox could not load the map style. Check that VITE_MAPBOX_TOKEN is valid.')
-    })
+    map.current.on('error', handleError)
     map.current.addControl(new NavigationControl({ showCompass: false }), 'top-right')
 
     return () => {
+      map.current?.off('error', handleError)
       map.current?.remove()
       map.current = null
       setMapReady(false)
@@ -115,38 +191,44 @@ function VehicleMap({ points }: { points: VehiclePoint[] }) {
   // Rebuild markers whenever fresh API data arrives, then fit the camera to the
   // current vehicle extent so vehicles across Victoria remain visible.
   useEffect(() => {
-    if (!map.current) return
+    if (!map.current || !mapReady) return
 
-    const markers: [number, number][] = []
+    const coords: [number, number][] = []
     const mapMarkers = points.map((point) => {
+      const ageSec = point.timestampSec === null ? null : Math.max(0, nowMs / 1000 - point.timestampSec)
+      const state = freshness(ageSec)
       const element = document.createElement('button')
       element.type = 'button'
-      element.className = 'vehicle-marker'
-      element.ariaLabel = `Show details for ${point.id}`
-      element.style.setProperty('--bearing', `${point.bearing ?? 0}deg`)
+      element.className = `vehicle-marker${state === 'stale' ? ' is-stale' : ''}${state === 'ageing' ? ' is-ageing' : ''}`
+      element.ariaLabel = point.hasBearing
+        ? `${point.vehicleLabel} on ${point.line} line, heading ${Math.round(point.bearing)} degrees ${point.compass}, updated ${formatAge(ageSec)}`
+        : `${point.vehicleLabel} on ${point.line} line, updated ${formatAge(ageSec)}`
+      element.title = element.ariaLabel
+      // Inner arrow rotates; outer button stays unrotated so Mapbox positioning
+      // and the circular badge are unaffected.
+      element.innerHTML = `<span class="vehicle-arrow" style="transform: rotate(${point.hasBearing ? point.bearing : 0}deg)"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 2.5 19 20l-7-4.2L5 20z"></path></svg>${point.hasBearing ? '' : '<span class="vehicle-dot"></span>'}</span>`
 
-      const popupContent = Object.entries(point.values)
-        .map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`)
-        .join('')
+      const heading = point.hasBearing ? `${Math.round(point.bearing)}° ${point.compass}` : 'no bearing'
+      const popupHtml = `<strong>${escapeHtml(point.vehicleLabel)}</strong><span class="popup-line">${escapeHtml(point.line)} line · ${escapeHtml(state)}</span><dl><dt>heading</dt><dd>${escapeHtml(heading)}</dd><dt>updated</dt><dd>${escapeHtml(formatAge(ageSec))}</dd><dt>trip</dt><dd>${escapeHtml(point.tripId)}</dd><dt>position</dt><dd>${escapeHtml(`${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`)}</dd>${point.speedKmh !== null ? `<dt>speed</dt><dd>${escapeHtml(`${point.speedKmh} km/h`)}</dd>` : ''}</dl>`
       const marker = new Marker({ element })
         .setLngLat([point.longitude, point.latitude])
-        .setPopup(new Popup({ offset: 14, maxWidth: '320px' }).setHTML(`<strong>${escapeHtml(point.id)}</strong><dl>${popupContent}</dl>`))
+        .setPopup(new Popup({ offset: 18, maxWidth: '300px' }).setHTML(popupHtml))
         .addTo(map.current as Map)
 
-      markers.push([point.longitude, point.latitude])
+      coords.push([point.longitude, point.latitude])
       return marker
     })
 
-    if (markers.length === 1) {
-      map.current.setCenter(markers[0])
+    if (coords.length === 1) {
+      map.current.setCenter(coords[0])
       map.current.setZoom(11)
-    } else if (markers.length > 1) {
-      const bounds = markers.reduce((currentBounds, marker) => currentBounds.extend(marker), new LngLatBounds(markers[0], markers[0]))
+    } else if (coords.length > 1) {
+      const bounds = coords.reduce((currentBounds, coord) => currentBounds.extend(coord), new LngLatBounds(coords[0], coords[0]))
       map.current.fitBounds(bounds, { padding: 64, maxZoom: 12, duration: 500 })
     }
 
     return () => mapMarkers.forEach((marker) => marker.remove())
-  }, [points, mapReady])
+  }, [points, mapReady, nowMs])
 
   if (!token) {
     return <div className="map-missing">Add <code>VITE_MAPBOX_TOKEN</code> to <code>.env</code> to load the Victoria basemap.</div>
@@ -154,7 +236,7 @@ function VehicleMap({ points }: { points: VehiclePoint[] }) {
 
   return (
     <div className="map-wrap">
-      <div ref={mapContainer} className="map" role="img" aria-label="Live vehicle positions across Victoria" />
+      <div ref={mapContainer} className="map" role="region" aria-label="Live vehicle positions across Victoria" />
       {mapError && <div className="map-error" role="alert">{mapError}</div>}
     </div>
   )
@@ -164,6 +246,8 @@ function App() {
   const [data, setData] = useState<VehiclePositionFeed | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedLine, setSelectedLine] = useState<string>('all')
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
   useEffect(() => {
     async function load() {
@@ -187,8 +271,26 @@ function App() {
     load()
   }, [])
 
+  // Tick so "Xs ago" ages and stale states stay truthful without refetching.
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 10000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   const points = data ? extractVehiclePoints(data) : []
-  const columns = Array.from(new Set(points.flatMap((point) => Object.keys(point.values))))
+  const lineCounts = points.reduce<Record<string, number>>((acc, point) => {
+    acc[point.line] = (acc[point.line] ?? 0) + 1
+    return acc
+  }, {})
+  const lines = Object.keys(lineCounts).sort()
+  // Reset a stale filter if a refetch no longer contains that line.
+  const effectiveLine = selectedLine === 'all' || lineCounts[selectedLine] ? selectedLine : 'all'
+  const filteredPoints = effectiveLine === 'all' ? points : points.filter((point) => point.line === effectiveLine)
+  const staleCount = points.filter((point) => {
+    const age = point.timestampSec === null ? null : Math.max(0, nowMs / 1000 - point.timestampSec)
+    return freshness(age) === 'stale'
+  }).length
+  const columns = Array.from(new Set(filteredPoints.flatMap((point) => Object.keys(point.values))))
 
   return (
     <main className="app-shell">
@@ -198,7 +300,13 @@ function App() {
           <h1>Vehicle positions</h1>
           <p className="subtitle">Where is my train dude? A live view of every vehicle position returned by the feed.</p>
         </div>
-        {!loading && !error && <div className="feed-stat"><strong>{points.length}</strong><span>vehicles plotted</span></div>}
+        {!loading && !error && (
+          <div className="feed-stats">
+            <div className="feed-stat"><strong>{filteredPoints.length}</strong><span>vehicles plotted</span></div>
+            <div className="feed-stat"><strong>{lines.length}</strong><span>lines active</span></div>
+            <div className="feed-stat"><strong>{staleCount}</strong><span>stale &gt;5m</span></div>
+          </div>
+        )}
       </header>
 
       {loading && <p>Loading data...</p>}
@@ -208,8 +316,14 @@ function App() {
         <div className="dashboard-grid">
           <section className="panel map-panel">
             <div className="section-heading"><div><p className="eyebrow">Geographic overview</p><h2>Live map</h2></div><span className="map-badge">VICTORIA</span></div>
-            <VehicleMap points={points} />
-            <div className="map-footer"><span><i className="legend-dot" /> Vehicle position</span><span>Click a marker for full details</span></div>
+            <div className="line-filters" role="group" aria-label="Filter by line">
+              <button type="button" className={effectiveLine === 'all' ? 'line-chip is-active' : 'line-chip'} onClick={() => setSelectedLine('all')}>All · {points.length}</button>
+              {lines.map((line) => (
+                <button key={line} type="button" className={effectiveLine === line ? 'line-chip is-active' : 'line-chip'} onClick={() => setSelectedLine(line)} title={`Show only ${line} line vehicles`}>{line} · {lineCounts[line]}</button>
+              ))}
+            </div>
+            <VehicleMap points={filteredPoints} nowMs={nowMs} />
+            <div className="map-footer"><span><i className="legend-dot" /> Arrow points travel direction (0° N, 90° E)</span><span>Grey ring = stale &gt;5m · Click a marker for details</span></div>
           </section>
 
           <section className="panel table-panel">
@@ -219,13 +333,13 @@ function App() {
                 <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>
               </thead>
               <tbody>
-                {points.map((point, index) => (
+                {filteredPoints.map((point, index) => (
                   <tr key={`${point.id}-${index}`}>{columns.map((column) => <td key={column} title={point.values[column]}>{point.values[column] ?? '-'}</td>)}
                   </tr>
                 ))}
               </tbody>
             </table></div>
-            {!points.length && <p className="empty-state">No vehicle entities with coordinates were returned by the API.</p>}
+            {!filteredPoints.length && <p className="empty-state">No vehicle entities with coordinates were returned by the API.</p>}
             {data !== null && <details className="raw-feed"><summary>Inspect raw API response</summary><pre>{JSON.stringify(data, null, 2)}</pre></details>}
           </section>
         </div>

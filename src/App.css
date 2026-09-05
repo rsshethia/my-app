@@ -11,10 +11,15 @@ h1, h2 { margin: 0; color: #183338; font-family: var(--heading); }
 h1 { font-size: clamp(2.3rem, 5vw, 4.8rem); line-height: 0.98; letter-spacing: -0.04em; }
 h2 { font-size: 1.45rem; letter-spacing: -0.02em; }
 .subtitle { margin-top: 14px; color: #607276; font-size: 1rem; }
+.feed-stats { display: flex; gap: 12px; }
 .feed-stat, .map-badge, .column-count { display: flex; flex-direction: column; color: #607276; font: 0.7rem/1.3 var(--mono); letter-spacing: 0.07em; text-transform: uppercase; }
-.feed-stat { min-width: 128px; padding: 16px 18px; border-left: 3px solid #df5c3f; background: #f4eee7; }
+.feed-stat { min-width: 118px; padding: 14px 16px; border-left: 3px solid #df5c3f; background: #f4eee7; }
 .feed-stat strong { color: #183338; font: 700 1.7rem/1 var(--heading); letter-spacing: 0; }
 .feed-stat span { margin-top: 5px; }
+.line-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.line-chip { padding: 7px 11px; border: 1px solid #d4dfdc; border-radius: 999px; background: #f4f8f6; color: #294348; font: 700 0.7rem var(--mono); letter-spacing: 0.04em; cursor: pointer; }
+.line-chip:hover { border-color: #183338; }
+.line-chip.is-active { border-color: #183338; background: #183338; color: #fff; }
 .dashboard-grid { display: grid; gap: 26px; }
 .panel { border: 1px solid #d4dfdc; border-radius: 8px; background: #fff; box-shadow: 0 12px 32px rgba(24, 51, 56, 0.07); }
 .map-panel { padding: 22px; }
@@ -26,8 +31,13 @@ h2 { font-size: 1.45rem; letter-spacing: -0.02em; }
 .map-error { position: absolute; inset: 16px 56px auto 16px; padding: 12px 15px; border: 1px solid #e7b9a7; border-radius: 5px; background: #fff8f2; color: #9b422f; font: 0.75rem/1.4 var(--mono); box-shadow: 0 2px 8px rgba(24, 51, 56, 0.12); }
 .mapboxgl-canvas { outline: none; }
 .mapboxgl-ctrl-group { border-radius: 5px; box-shadow: 0 2px 8px rgba(24, 51, 56, 0.16); }
-.vehicle-marker { width: 18px; height: 18px; padding: 0; border: 2px solid #fff; border-radius: 50% 50% 50% 0; background: #df5c3f; box-shadow: 0 2px 7px rgba(24, 51, 56, 0.35); cursor: pointer; transform: rotate(-45deg); }
-.vehicle-marker::after { content: ''; display: block; width: 4px; height: 4px; margin: 5px auto; border-radius: 50%; background: #fff; transform: rotate(calc(var(--bearing, 0deg) + 45deg)); }
+.vehicle-marker { width: 30px; height: 30px; padding: 0; border: 2px solid #fff; border-radius: 50%; background: #183338; box-shadow: 0 2px 8px rgba(24, 51, 56, 0.4); cursor: pointer; display: grid; place-items: center; }
+.vehicle-marker:hover { transform: scale(1.12); }
+.vehicle-arrow { display: grid; place-items: center; width: 100%; height: 100%; transition: transform 0.4s ease; }
+.vehicle-arrow svg { fill: #fff; display: block; }
+.vehicle-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #fff; }
+.vehicle-marker.is-ageing { background: #b7791f; }
+.vehicle-marker.is-stale { background: #8a9494; opacity: 0.75; border-style: dashed; }
 .map-missing { display: grid; min-height: 300px; place-items: center; padding: 24px; border: 1px dashed #d4dfdc; border-radius: 5px; background: #f4f8f6; color: #607276; text-align: center; }
 .map-missing code { display: inline; padding: 2px 5px; }
 .map-label, .marker-label { font-family: var(--mono); font-size: 2.5px; fill: #607276; }
@@ -49,6 +59,7 @@ tbody tr:hover { background: #fff8f2; }
 .raw-feed pre { max-height: 360px; overflow: auto; padding: 16px; background: #183338; color: #d9ebe5; font: 0.72rem/1.5 var(--mono); }
 .mapboxgl-popup-content { color: #294348; font-family: var(--sans); }
 .mapboxgl-popup-content strong { color: #183338; font-family: var(--heading); font-size: 1rem; }
+.popup-line { display: block; margin-top: 2px; color: #607276; font: 700 0.68rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
 .mapboxgl-popup-content dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; max-height: 240px; margin: 12px 0 0; overflow: auto; }
 .mapboxgl-popup-content dt { color: #718184; font: 0.65rem var(--mono); }
 .mapboxgl-popup-content dd { margin: 0; overflow: hidden; font: 0.7rem var(--mono); text-overflow: ellipsis; white-space: nowrap; }
