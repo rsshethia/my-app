@@ -63,6 +63,19 @@ tbody tr:hover { background: #fff8f2; }
 .mapboxgl-popup-content dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; max-height: 240px; margin: 12px 0 0; overflow: auto; }
 .mapboxgl-popup-content dt { color: #718184; font: 0.65rem var(--mono); }
 .mapboxgl-popup-content dd { margin: 0; overflow: hidden; font: 0.7rem var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.analytics-panel { padding: 22px; }
+.analytics-grid { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.range-toggle { display: flex; gap: 8px; }
+.analytics-note { color: #718184; font: 0.8rem/1.5 var(--mono); }
+.line-bars { display: grid; gap: 8px; margin-bottom: 18px; }
+.line-bar-row { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 10px; font: 0.72rem var(--mono); color: #294348; }
+.line-bar-code { font-weight: 700; }
+.line-bar-track { display: block; height: 10px; border-radius: 999px; background: #eef4f1; overflow: hidden; }
+.line-bar-fill { display: block; height: 100%; background: #df5c3f; border-radius: 999px; }
+.line-bar-num { color: #607276; white-space: nowrap; }
+.trail-lookup label { display: block; margin-bottom: 6px; color: #607276; font: 700 0.68rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.trail-row { display: flex; gap: 8px; }
+.trail-row select { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid #d4dfdc; border-radius: 6px; font: 0.78rem var(--mono); color: #294348; background: #fff; }
 @media (max-width: 640px) {
   .app-shell { padding-top: 32px; }
   .page-header { align-items: flex-start; flex-direction: column; }

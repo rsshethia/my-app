@@ -3,6 +3,7 @@ import { LngLatBounds, Map, Marker, NavigationControl, Popup } from 'mapbox-gl/e
 import 'mapbox-gl/dist/mapbox-gl.css'
 import './App.css'
 import { fetchVehiclePositions, type VehiclePositionFeed } from './api/fetchData'
+import { fetchStats, fetchTripHistory, type StatsSummary } from './api/history'
 
 type VehiclePoint = {
   id: string
@@ -248,18 +249,18 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [selectedLine, setSelectedLine] = useState<string>('all')
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [stats, setStats] = useState<StatsSummary | null>(null)
+  const [statsError, setStatsError] = useState<string | null>(null)
+  const [statsRange, setStatsRange] = useState<'24h' | '10d'>('24h')
+  const [trailTripId, setTrailTripId] = useState<string>('')
+  const [trailInfo, setTrailInfo] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
       const apiKey = import.meta.env.VITE_VLINE_KEY as string | undefined
-      if (!apiKey) {
-        setError('Missing VLINE API key. Set VITE_VLINE_KEY in .env (do NOT commit the key).')
-        setLoading(false)
-        return
-      }
 
       try {
-        const result = await fetchVehiclePositions(apiKey)
+        const result = await fetchVehiclePositions(apiKey ?? '')
         setData(result)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load vehicle positions')
@@ -270,6 +271,16 @@ function App() {
 
     load()
   }, [])
+
+  // 10-day history stats (independent of live load; degrades gracefully when
+  // the server runs without DATABASE_URL, e.g. plain `vite dev`).
+  useEffect(() => {
+    let cancelled = false
+    fetchStats(statsRange)
+      .then((s) => { if (!cancelled) { setStats(s); setStatsError(null) } })
+      .catch((err: unknown) => { if (!cancelled) setStatsError(err instanceof Error ? err.message : String(err)) })
+    return () => { cancelled = true }
+  }, [statsRange])
 
   // Tick so "Xs ago" ages and stale states stay truthful without refetching.
   useEffect(() => {
@@ -341,6 +352,74 @@ function App() {
             </table></div>
             {!filteredPoints.length && <p className="empty-state">No vehicle entities with coordinates were returned by the API.</p>}
             {data !== null && <details className="raw-feed"><summary>Inspect raw API response</summary><pre>{JSON.stringify(data, null, 2)}</pre></details>}
+          </section>
+
+          <section className="panel analytics-panel">
+            <div className="section-heading">
+              <div><p className="eyebrow">10-day history</p><h2>Analytics</h2></div>
+              <div className="range-toggle" role="group" aria-label="Analytics range">
+                {(['24h', '10d'] as const).map((r) => (
+                  <button key={r} type="button" className={statsRange === r ? 'line-chip is-active' : 'line-chip'} onClick={() => setStatsRange(r)}>{r}</button>
+                ))}
+              </div>
+            </div>
+            {statsError && <p className="analytics-note">History unavailable ({statsError}). Start the server with DATABASE_URL to enable it.</p>}
+            {!statsError && !stats && <p className="analytics-note">Loading history…</p>}
+            {stats && (
+              <>
+                <div className="analytics-grid">
+                  <div className="feed-stat"><strong>{stats.totalSightings}</strong><span>sightings</span></div>
+                  <div className="feed-stat"><strong>{stats.vehiclesActive}</strong><span>vehicles</span></div>
+                  <div className="feed-stat"><strong>{stats.pollsSeen}/{stats.pollsExpected}</strong><span>polls (coverage)</span></div>
+                </div>
+                <div className="line-bars">
+                  {stats.perLine.map((row) => {
+                    const max = Math.max(1, ...stats.perLine.map((r) => r.sightings))
+                    return (
+                      <div key={row.line_code} className="line-bar-row">
+                        <span className="line-bar-code">{row.line_code}</span>
+                        <span className="line-bar-track"><span className="line-bar-fill" style={{ width: `${Math.round((row.sightings / max) * 100)}%` }} /></span>
+                        <span className="line-bar-num">{row.sightings} · {row.trips} trips</span>
+                      </div>
+                    )
+                  })}
+                  {!stats.perLine.length && <p className="analytics-note">No history yet — the collector writes its first rows within a minute of server start.</p>}
+                </div>
+                <div className="trail-lookup">
+                  <label htmlFor="trail-trip">Trip trail</label>
+                  <div className="trail-row">
+                    <select
+                      id="trail-trip"
+                      value={trailTripId}
+                      onChange={(e) => { setTrailTripId(e.target.value); setTrailInfo(null) }}
+                    >
+                      <option value="">Select a trip…</option>
+                      {stats.recentTrips.map((t) => (
+                        <option key={t.trip_id} value={t.trip_id}>{t.trip_id} ({t.line_code}, {t.sightings}x)</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="line-chip"
+                      disabled={!trailTripId}
+                      onClick={async () => {
+                        try {
+                          const h = await fetchTripHistory(trailTripId)
+                          const first = h.points[0]?.fetched_at ?? '?'
+                          const last = h.points[h.points.length - 1]?.fetched_at ?? '?'
+                          setTrailInfo(`${h.points.length} points · ${first} → ${last}`)
+                        } catch (err) {
+                          setTrailInfo(err instanceof Error ? err.message : String(err))
+                        }
+                      }}
+                    >
+                      Load trail
+                    </button>
+                  </div>
+                  {trailInfo && <p className="analytics-note">{trailInfo}</p>}
+                </div>
+              </>
+            )}
           </section>
         </div>
       )}
